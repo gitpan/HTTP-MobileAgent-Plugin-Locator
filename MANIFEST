@@ -1,4 +1,4 @@
-Build.PL
+.shipit
 Changes
 eg/location.inc
 eg/rewrite.conf
@@ -6,7 +6,6 @@ inc/Module/AutoInstall.pm
 inc/Module/Install.pm
 inc/Module/Install/AutoInstall.pm
 inc/Module/Install/Base.pm
-inc/Module/Install/Build.pm
 inc/Module/Install/Can.pm
 inc/Module/Install/Fetch.pm
 inc/Module/Install/Include.pm
@@ -34,3 +33,6 @@ t/03.non_mobile.t
 t/04.apache_params.t
 t/05.cgi_params.t
 t/06.hashref_params.t
+t/07.gps_parameter.t
+t/08.regression-params.t
+t/09.get_carrier_locator.t

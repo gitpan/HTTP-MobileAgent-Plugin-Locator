@@ -7,67 +7,117 @@ use Carp;
 use UNIVERSAL::require;
 use UNIVERSAL::can;
 
-our $VERSION = '0.01';
+use base qw( Exporter );
+our @EXPORT_OK = qw( $LOCATOR_AUTO_FROM_COMPLIANT $LOCATOR_AUTO $LOCATOR_GPS $LOCATOR_BASIC );
+our %EXPORT_TAGS = (locator => [@EXPORT_OK]);
 
-our $DOCOMO_GPS_COMPLIANT_MODELS = qr/(?:903i(?!TV|X)|(?:90[45]|SA[78]0[02])i)/;
+our $VERSION = '0.02';
+
+our $DOCOMO_GPS_COMPLIANT_MODELS = qr/(?:903i(?!TV|X)|(?:90[4-6]|SA[78]0[02])i)/;
+
+our $LOCATOR_AUTO_FROM_COMPLIANT = 1;
+our $LOCATOR_AUTO                = 2;
+our $LOCATOR_GPS                 = 3;
+our $LOCATOR_BASIC               = 4;
+
 
 sub import {
-    my $class = shift;
+    my ( $class ) = @_;
     no strict 'refs';
-    *{"HTTP\::MobileAgent\::gps_compliant"} = \&_gps_compliant;
-    *{"HTTP\::MobileAgent\::locator"}       = sub { $class->new( shift ) };
-    *{"HTTP\::MobileAgent\::get_location"}  = sub {
-        my ( $self, $stuff ) = @_;
-        $self->locator->get_location( _prepare_params( $stuff ) );
+    *HTTP::MobileAgent::gps_compliant = \&_gps_compliant;
+    *HTTP::MobileAgent::locator       = sub { $class->new( @_ ) };
+    *HTTP::MobileAgent::get_location  = sub {
+        my ( $self, $stuff, $option_ref ) = @_;
+        my $params = _prepare_params( $stuff );
+        $self->locator( $params, $option_ref )->get_location( $params );
     };
-}
-
-sub _gps_compliant {
-    my $self = shift;
-    if ( $self->is_docomo ) {
-        return $self->model =~ $DOCOMO_GPS_COMPLIANT_MODELS;
-    } elsif ( $self->is_ezweb ) {
-        my @specs = split //, $ENV{ HTTP_X_UP_DEVCAP_MULTIMEDIA } || '';
-        return defined $specs[ 1 ] && $specs[ 1 ] =~ /^[23]$/;
-    } elsif ( $self->is_softbank ) {
-        return $self->is_type_3gc;
-    }
+    $class->export_to_level( 1, @_ );
 }
 
 sub new {
-    my ( $class, $agent ) = @_;
-
-    my $sub;
-    if ( $agent->is_docomo ) {
-        $sub = $agent->gps_compliant ? 'DoCoMo::GPS'
-                                     : 'DoCoMo::BasicLocation';
-    }
-    elsif ( $agent->is_ezweb ) {
-        $sub = $agent->gps_compliant ? 'EZweb::GPS'
-                                     : 'EZweb::BasicLocation';
-    }
-    elsif ( $agent->is_softbank ) {
-        $sub = $agent->gps_compliant ? 'SoftBank::GPS'
-                                     : 'SoftBank::BasicLocation';
-    }
-    elsif ( $agent->is_airh_phone ) {
-        $sub = 'Willcom::BasicLocation';
-    }
-    else {
-        croak( "Invalid mobile user agent: " . $agent->user_agent );
-    }
-
-    my $locator_class = "HTTP::MobileAgent::Plugin::Locator\::$sub";
+    my ( $class, $agent, $params, $option_ref ) = @_;
+    my $carrier_locator = _get_carrier_locator( $agent, $params, $option_ref );
+    my $locator_class = "HTTP::MobileAgent::Plugin::Locator::$carrier_locator";
     $locator_class->require or die $!;
     return bless {}, $locator_class;
 }
 
 sub get_location { die "ABSTRACT METHOD" }
 
+sub _gps_compliant {
+    my $self = shift;
+    if ( $self->is_docomo ) {
+        return $self->model =~ $DOCOMO_GPS_COMPLIANT_MODELS;
+    }
+    elsif ( $self->is_ezweb ) {
+        my @specs = split //, $ENV{ HTTP_X_UP_DEVCAP_MULTIMEDIA } || '';
+        return defined $specs[ 1 ] && $specs[ 1 ] =~ /^[23]$/;
+    }
+    elsif ( $self->is_softbank ) {
+        return $self->is_type_3gc;
+    }
+}
+
+sub _get_carrier_locator {
+    my ( $agent, $params, $option_ref ) = @_;
+
+    my $carrier = $agent->is_docomo     ? 'DoCoMo'
+                : $agent->is_ezweb      ? 'EZweb'
+                : $agent->is_softbank   ? 'SoftBank'
+                : $agent->is_airh_phone ? 'Willcom'
+                : undef;
+    croak( "Invalid mobile user agent: " . $agent->user_agent ) if !$carrier;
+
+    my $locator;
+    if ( !defined $option_ref
+         || !defined $option_ref->{locator}
+         || $option_ref->{locator} eq $LOCATOR_AUTO_FROM_COMPLIANT ) {
+        $locator = $agent->gps_compliant ? 'GPS' : 'BasicLocation';
+    }
+    elsif ( $option_ref->{locator} eq $LOCATOR_AUTO ) {
+        $locator = _is_gps_parameter( $agent, $params ) ? 'GPS' : 'BasicLocation';
+    }
+    elsif ( $option_ref->{locator} eq $LOCATOR_GPS ) {
+        $locator = 'GPS';
+    }
+    elsif ( $option_ref->{locator} eq $LOCATOR_BASIC ) {
+        $locator = 'BasicLocation';
+    }
+    else {
+        croak( "Invalid locator: " . $option_ref->{locator} );
+    }
+
+    return $carrier . '::' . $locator;
+}
+
+# to check whether parameter is gps or basic
+sub _is_gps_parameter {
+    my ( $agent, $stuff ) = @_;
+    my $params = _prepare_params( $stuff );
+    if ( $agent->is_docomo ) {
+        return !defined $params->{ AREACODE };
+    }
+    elsif ( $agent->is_ezweb ) {
+        return defined $params->{ datum } && $params->{ datum } =~ /^\d+$/
+    }
+    elsif ( $agent->is_softbank ) {
+        return defined $params->{ pos };
+    }
+    elsif ( $agent->is_airh_phone ) {
+        return;
+    }
+    else {
+        croak( "Invalid mobile user agent: " . $agent->user_agent );
+    }
+}
+
 sub _prepare_params {
     my $stuff = shift;
     if ( ref $stuff && eval { $stuff->can( 'param' ) } ) {
-        return +{ map { $_ => $stuff->param( $_ ) } $stuff->param };
+        return +{ map {
+            $_ => ( scalar(@{[$stuff->param($_)]}) > 1 ) ? [ $stuff->param( $_ ) ]
+                                                         : $stuff->param( $_ )
+        } $stuff->param };
     }
     else {
         return $stuff;
@@ -87,29 +137,54 @@ HTTP::MobileAgent::Plugin::Locator - Handling mobile location information plugin
     use HTTP::MobileAgent;
     use HTTP::MobileAgent::Plugin::Locator;
 
-    # get location is Geo::Coordinates::Converter::Point instance formatted wgs84
-    my $q = CGI->new;
-    my $agent = HTTP::MobileAgent->new;
-    my $location = $agent->get_location( $q );
+    $q = CGI->new;
+    $agent = HTTP::MobileAgent->new;
 
+    # get location is Geo::Coordinates::Converter::Point instance formatted wgs84
+    # ./t/* has many examples.
+    $location = $agent->get_location( $q );
+    # or
+    $location = $agent->get_location( { lat => '35.21.03.342',
+                                        lon => '138.34.45.725',
+                                        geo => 'wgs84' } );
+    # or
+    $location = $agent->get_location( $q, { locator => $LOCATOR_GPS } );
+
+    # get latitude and longitude
     print "lat is " . $location->lat;
     print "lng is " . $location->lng;
 
 =head1 METHODS
 
-=over
-
-=item get_location([params]);
+=head2 get_location([params], $option_ref);
 
 return Geo::Coordinates::Converter::Point instance formatted if specify gps or basic location parameters sent from carrier. The parameters are different by each carrier.
 
 This method accept a Apache instance, CGI instance or hashref of query parameters.
 
-=item gps_compliant()
+=over
 
-returns if the agent is GPS compliant.
+=item $option_ref->{locator}
+
+select locator class algorithm option.
+
+$LOCATOR_AUTO_FROM_COMPLIANT
+ auto detect locator from gps compliant. This is I<default>.
+
+$LOCATOR_AUTO
+ auto detect locator class from params.
+
+$LOCATOR_GPS
+ select GPS class.
+
+$LOCATOR_BASIC
+ select BasicLocation class.
 
 =back
+
+=head2 gps_compliant()
+
+returns if the agent is GPS compliant.
 
 =head1 CLASSES
 
@@ -154,37 +229,15 @@ There is request template using C<Template> in eg directory and mod_rewrite conf
 Yoshiki Kurihara  E<lt>kurihara __at__ cpan.orgE<gt> with many feedbacks and changes from:
 
   Tokuhiro Matsuno E<lt>tokuhiro __at__ mobilefactory.jpE<gt>
+  Masahiro Chiba E<lt>chiba __at__ geminium.comE<gt>
 
 =head1 SEE ALSO
 
 C<HTTP::MobileAgent>, C<Geo::Coordinates::Converter>, C<Geo::Coordinates::Converter::Point>, C<Geo::Coordinates::Converter::iArea>, C<http://coderepos.org/share/log/lang/perl/HTTP-MobileAgent-Plugin-Locator/>
 
-=head1 LICENCE AND COPYRIGHT
-
-Copyright (c) 2008, Yoshiki Kurihara E<lt>kurihara __at__ cpan.orgE<gt>. All rights reserved.
+=head1 LICENCE
 
 This module is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself. See L<perlartistic>.
 
-=head1 DISCLAIMER OF WARRANTY
-
-BECAUSE THIS SOFTWARE IS LICENSED FREE OF CHARGE, THERE IS NO WARRANTY
-FOR THE SOFTWARE, TO THE EXTENT PERMITTED BY APPLICABLE LAW. EXCEPT WHEN
-OTHERWISE STATED IN WRITING THE COPYRIGHT HOLDERS AND/OR OTHER PARTIES
-PROVIDE THE SOFTWARE "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER
-EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE
-ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH
-YOU. SHOULD THE SOFTWARE PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL
-NECESSARY SERVICING, REPAIR, OR CORRECTION.
-
-IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
-WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MAY MODIFY AND/OR
-REDISTRIBUTE THE SOFTWARE AS PERMITTED BY THE ABOVE LICENCE, BE
-LIABLE TO YOU FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL,
-OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO USE
-THE SOFTWARE (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR DATA BEING
-RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR THIRD PARTIES OR A
-FAILURE OF THE SOFTWARE TO OPERATE WITH ANY OTHER SOFTWARE), EVEN IF
-SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF
-SUCH DAMAGES.
+=cut
