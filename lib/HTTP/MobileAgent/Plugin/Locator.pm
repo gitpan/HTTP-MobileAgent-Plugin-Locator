@@ -11,7 +11,7 @@ use base qw( Exporter );
 our @EXPORT_OK = qw( $LOCATOR_AUTO_FROM_COMPLIANT $LOCATOR_AUTO $LOCATOR_GPS $LOCATOR_BASIC );
 our %EXPORT_TAGS = (locator => [@EXPORT_OK]);
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 our $LOCATOR_AUTO_FROM_COMPLIANT = 1;
 our $LOCATOR_AUTO                = 2;
@@ -143,7 +143,7 @@ HTTP::MobileAgent::Plugin::Locator - Handling mobile location information plugin
 
 return Geo::Coordinates::Converter::Point instance formatted if specify gps or basic location parameters sent from carrier. The parameters are different by each carrier.
 
-This method accept a Apache instance, CGI instance or hashref of query parameters.
+This method accepts a CGI-ish object (an object with 'param' method, e.g. CGI.pm, Apache::Request, Plack::Request) or a hashref of query parameters.
 
 =over
 
@@ -207,11 +207,31 @@ for basic location information data support.
 
 There is request template using C<Template> in eg directory and mod_rewrite configuration for ezweb extraordinary parameter handling.
 
+=head1 COOK BOOK
+
+=over 4
+
+=item HOW DO I GET iArea area code.
+
+    use Geo::Coordinates::Converter::iArea;
+    my $areacode = $agent->get_location($q)->converter('iarea')->areacode;
+
+=item HOW DO I GET geohash.
+
+    use Geo::Coordinates::Converter::Format::GeoHash;
+    my $geohash = $ma->get_location(
+        { lat => '35.21.03.342', lon => '138.34.45.725', geo => 'wgs84' },
+    )->converter('wgs84', 'geohash')->geohash;
+
+=item 
+
+=back
+
 =head1 AUTHOR
 
 Yoshiki Kurihara  E<lt>kurihara __at__ cpan.orgE<gt> with many feedbacks and changes from:
 
-  Tokuhiro Matsuno E<lt>tokuhiro __at__ mobilefactory.jpE<gt>
+  Tokuhiro Matsuno E<lt>tokuhirom __at__ gmail.comE<gt>
   Masahiro Chiba E<lt>chiba __at__ geminium.comE<gt>
 
 =head1 SEE ALSO

@@ -5,6 +5,7 @@ author:
 build_requires:
   ExtUtils::MakeMaker: 6.42
   Test::More: 0
+  Test::Requires: 0
 configure_requires:
   ExtUtils::MakeMaker: 6.42
 distribution_type: module
@@ -19,11 +20,11 @@ no_index:
     - inc
     - t
 requires:
-  Geo::Coordinates::Converter: 0
-  Geo::Coordinates::Converter::iArea: 0.08
-  HTTP::MobileAgent: 0.29
+  Geo::Coordinates::Converter: 0.10
+  Geo::Coordinates::Converter::iArea: 0.11
+  HTTP::MobileAgent: 0.31
   UNIVERSAL::can: 0
   UNIVERSAL::require: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 0.03
+version: 0.04
